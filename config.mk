@@ -53,6 +53,7 @@ endif
 # Default game variables
 GAME_REVISION ?= 0
 GAME_REGION   ?= USA
+GAME_VARIANT  ?= DEFAULT
 DEBUG         ?= 0
 
 # For gbafix
@@ -75,6 +76,10 @@ endif
 ifeq ($(GAME_REGION), USA)
   BUILD_NAME := $(BUILD_NAME)
   GAME_CODE  := $(GAME_CODE)E
+  ifeq ($(GAME_VARIANT), BETA)
+    MAKER_CODE := 8P
+    BUILD_NAME := $(BUILD_NAME)_beta
+  endif
 else
 ifeq ($(GAME_REGION), JAPAN)
   BUILD_NAME := $(BUILD_NAME)_japan
@@ -92,10 +97,8 @@ endif
 endif
 endif
 
-ifeq ($(CREATE_PDB),1)
-    # If the user wants a PDB, the output needs to include debug info
-    # TODO: Is there a way to ECHO here?
-    DEBUG := 1
+ifeq ($(GAME_VARIANT), VIRTUAL_CONSOLE)
+  BUILD_NAME := $(BUILD_NAME)_vc
 endif
 
 # Debug

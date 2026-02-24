@@ -1,5 +1,9 @@
+#if TAS_TESTING
+#include <stdlib.h>
+#include <stdio.h>
+#endif
+
 #include "global.h"
-#include "core.h"
 #include "flags.h"
 #include "task.h"
 #include "trig.h"
@@ -17,14 +21,9 @@
 #include "game/stage/player.h"
 #include "game/stage/results.h"
 #include "game/stage/boss_results_transition.h"
-#include "game/stage/game_7.h"
+#include "game/stage/screen_mask.h"
 #include "game/stage/screen_fade.h"
 #include "game/stage/screen_shake.h"
-
-#if TAS_TESTING
-#include <stdio.h>
-#include <stdlib.h>
-#endif
 
 #include "constants/animations.h"
 #include "constants/char_states.h"
@@ -174,7 +173,7 @@ const u16 gUnknown_080D8888[2][2] = { { Q(188), Q(110) }, { Q(162), Q(110) } };
 static const EggRoboFn sArmFuncs[8]
     = { sub_804B43C, sub_804B594, sub_804B734, sub_804B984, sub_804BC44, sub_804BE6C, sub_804BAC0, sub_804C240 };
 
-const u16 sArmPalettes[2][16] = {
+const u16 sArmPalettes[2][PALETTE_LEN_4BPP] = {
     INCBIN_U16("graphics/boss_8_a.gbapal"),
     INCBIN_U16("graphics/boss_8_b.gbapal"),
 };
@@ -298,7 +297,7 @@ static void Task_BossRunManagerMain(void)
                             r6 = Q(r4);
                             r0 = r5 + r6;
                             gPlayer.qWorldX = r0;
-                            gUnknown_030054FC = r6;
+                            gWorldSpeedX = r6;
                             sub_8039F50(r6, manager->bossIndex);
                             gBossRingsShallRespawn = 1;
                             gCamera.x += r4;
@@ -325,7 +324,7 @@ static void Task_BossRunManagerMain(void)
                 r4 = gUnknown_080D8808[manager->bossIndex][1];
                 r5 = Q(r4);
                 gPlayer.qWorldX += r5;
-                gUnknown_030054FC = r5;
+                gWorldSpeedX = r5;
                 sub_8039F50(r5, manager->bossIndex);
                 gBossRingsShallRespawn = 1;
                 gCamera.x += r4;
@@ -344,7 +343,7 @@ static void Task_BossRunManagerMain(void)
                 gCamera.unkC = 1;
                 gCamera.unk8 = 1280;
             }
-            gUnknown_030054B0 = 1;
+            gFinalBossActive = TRUE;
         } else {
             manager->unk5++;
         }
@@ -725,11 +724,7 @@ void CreateSuperEggRoboZ(void)
     gBgCntRegs[2] = (BGCNT_TXT256x256 | BGCNT_SCREENBASE(31) | BGCNT_CHARBASE(0) | BGCNT_PRIORITY(1));
     gBgScrollRegs[0][0] = 0;
     gBgScrollRegs[0][1] = 0;
-    gUnknown_03004D80[0] = 0;
-    gUnknown_03002280[0][0] = 0;
-    gUnknown_03002280[0][1] = 0;
-    gUnknown_03002280[0][2] = 0xFF;
-    gUnknown_03002280[0][3] = 0x40;
+    INIT_BG_SPRITES_LAYER_64(0);
     gPlayer.moveState |= MOVESTATE_IGNORE_INPUT;
     sub_8039ED4();
     gPseudoRandom = gStageTime;
@@ -1174,11 +1169,11 @@ void sub_804AE40(SuperEggRoboZ *boss)
                         "str r1, [sp, #4]\n\t"
                         "add r1, %2, #0\n\t"
                         "mov r2, #6\n\t"
-                        "bl sub_802E784"
+                        "bl ScreenMask_CreateShape"
                         :
                         : "r"(r8), "r"(r6), "r"(r4), "r"(boss));
 #else
-                    sub_802E784(boss->unk10, r4, 6, r8, r6 + 1, 32);
+                    ScreenMask_CreateShape(boss->unk10, r4, 6, r8, r6 + 1, 32);
 #endif
 
                     boss->fade.brightness = Q(32) - (boss->unk12 * 91);
@@ -1548,27 +1543,18 @@ static void sub_804BAC0(SuperEggRoboZ *boss, u8 arm)
     }
 }
 
-// (81.31%) https://decomp.me/scratch/432q4
-NONMATCH("asm/non_matching/game/bosses/boss_8__sub_804BC44.inc", void sub_804BC44(SuperEggRoboZ *boss, u8 arm))
+void sub_804BC44(SuperEggRoboZ *boss, u8 arm)
 {
     ExplosionPartsInfo info;
-    s32 speed0;
     s32 x, y;
     u8 i, j;
-#ifndef NON_MATCHING
-    register u16 *r3 asm("r3");
-#else
-    u16 *r3;
-#endif
 
     boss->qUnk18[arm].x -= ((COS(boss->rotation2[arm]) * 31) >> 10);
     boss->qUnk18[arm].y -= ((SIN(boss->rotation2[arm]) * 31) >> 10);
 
-    r3 = &boss->unk30[arm];
-    boss->rotation[arm] = ((*r3 * 4 + boss->rotation[arm]) & ONE_CYCLE);
+    boss->rotation[arm] = (boss->rotation[arm] + boss->unk30[arm] * 4) & ONE_CYCLE;
 
-    if (--boss->rotation2[arm] == 0) {
-        // _0804BCD6
+    if (--boss->unk30[arm] == 0) {
         x = boss->qPos.x + boss->qUnk18[arm].x + gUnknown_080D8888[arm][0];
         y = boss->qPos.y + boss->qUnk18[arm].y + gUnknown_080D8888[arm][1];
 
@@ -1577,25 +1563,11 @@ NONMATCH("asm/non_matching/game/bosses/boss_8__sub_804BC44.inc", void sub_804BC4
 
         for (i = 0; i < 3; i++) {
             for (j = 0; j < 3; j++) {
-                s32 index;
-
-                index = (boss->rotation[arm] - (SIN_PERIOD / 4));
-                info.spawnX = I(x) - ((COS(index & ONE_CYCLE) * (i - 1)) >> 11);
-                index = (boss->rotation[arm] - (SIN_PERIOD / 4));
-                info.spawnY = I(y) - ((SIN(index & ONE_CYCLE) * (i - 1)) >> 11);
-
+                info.spawnX = I(x) - ((COS((boss->rotation2[arm] - (SIN_PERIOD / 4)) & ONE_CYCLE) * (i - 1)) >> 11);
+                info.spawnY = I(y) - ((SIN((boss->rotation2[arm] - (SIN_PERIOD / 4)) & ONE_CYCLE) * (i - 1)) >> 11);
                 info.velocity = 0;
-                info.rotation = (boss->rotation[arm] + 576 - boss->rotation2[arm]) & ONE_CYCLE;
-                speed0 = (Q(2) + (j * Q(0.5)));
-
-                if ((1 - i) >= 0) {
-                    s32 speedI = ((1 - i) * 3);
-                    info.speed = speed0 - (speedI * Q(0.125));
-                } else {
-                    s32 speedI = ((i - 1) * 3);
-                    info.speed = speed0 - (speedI * Q(0.125));
-                }
-
+                info.rotation = (boss->rotation2[arm] + 576 - ((i * 2) + i + j) * (32)) & ONE_CYCLE;
+                info.speed = (Q(2) + (j * Q(0.5))) - ((ABS(1 - i) * 3) * Q(0.125));
                 info.vram = boss->tilesCloud;
                 info.anim = SA2_ANIM_SUPER_EGG_ROBO_Z_CLOUD;
                 info.variant = 0;
@@ -1605,12 +1577,11 @@ NONMATCH("asm/non_matching/game/bosses/boss_8__sub_804BC44.inc", void sub_804BC4
             }
         }
 
-        boss->rotation2[arm] = boss->rotation[arm];
+        boss->rotation[arm] = boss->rotation2[arm];
         boss->unk3C[arm] = 0;
         boss->unk30[arm] = 300;
     }
 }
-END_NONMATCH
 
 static void sub_804BE6C(SuperEggRoboZ *boss, u8 arm)
 {
@@ -1713,55 +1684,53 @@ static void sub_804C080(SuperEggRoboZ *boss)
     }
 }
 
-// (87.37%) https://decomp.me/scratch/98Mjg
-NONMATCH("asm/non_matching/game/bosses/boss_8__sub_804C240.inc", void sub_804C240(SuperEggRoboZ *boss, u8 arm))
+void sub_804C240(SuperEggRoboZ *boss, u8 arm)
 {
     ExplosionPartsInfo info;
-    s32 x, y;
-    s32 index;
+    s32 chance;
 
     if (boss->unk42[arm] != 0) {
         return;
     }
 
-    y = I(boss->qPos.y + boss->qUnk18[arm].y + gUnknown_080D8888[arm][1]);
-
-    if (y > 300) {
+    if (I(boss->qPos.y + boss->qUnk18[arm].y + gUnknown_080D8888[arm][1]) > 300) {
         boss->unk42[arm] = 1;
         return;
     }
 
-    boss->rotation[arm] = (boss->rotation[arm] + 800);
-    boss->rotation[arm] &= ONE_CYCLE;
+    chance = 0x1F;
+    boss->rotation[arm] = (boss->rotation[arm] + 800) & ONE_CYCLE;
     boss->qUnk34[arm][1] += Q(0.125);
     boss->qUnk18[arm].x += boss->qUnk34[arm][0];
     boss->qUnk18[arm].y += boss->qUnk34[arm][1];
 
     if ((gStageTime & 0x3) == 0) {
-        s32 rand;
-        x = boss->qPos.x;
-        x += gUnknown_080D8888[arm][0];
-        x += boss->qUnk18[arm].x;
-        y = boss->qPos.y;
-        y += boss->qUnk18[arm].y;
-        y += gUnknown_080D8888[arm][1];
+        s32 x, y;
+#ifndef NON_MATCHING
+        s32 one = 1;
+#endif
+
+        x = boss->qPos.x + boss->qUnk18[arm].x + gUnknown_080D8888[arm][0];
+        y = boss->qPos.y + boss->qUnk18[arm].y + gUnknown_080D8888[arm][1];
         info.spawnX = I(x);
         info.spawnY = I(y);
         info.velocity = 0;
         info.rotation = sub_8004418(-(boss->qUnk34[arm][1] >> 3), -(boss->qUnk34[arm][0] >> 3));
 
-        rand = PseudoRandom32();
-        index = (info.rotation + (rand & 0x1F));
-        info.rotation = (index - 0x10) & ONE_CYCLE;
+        info.rotation = ({ ((PseudoRandom32() & chance) + info.rotation) - 0x10; })
+#ifndef NON_MATCHING
+            & (SIN_PERIOD - one);
+#else
+            & ONE_CYCLE;
+#endif
         info.speed = SIN_24_8((gStageTime * 16) & ONE_CYCLE) + Q(3);
-        info.vram = (OBJ_VRAM0 + 0x12980);
+        info.vram = (OBJ_VRAM0 + 0x2980);
         info.anim = SA2_ANIM_EXPLOSION;
         info.variant = 0;
         info.unk4 = 0;
         CreateBossParticleStatic(&info, &boss->unkC);
     }
 }
-END_NONMATCH
 
 static void sub_804C3AC(SuperEggRoboZ *boss)
 {
@@ -1796,7 +1765,7 @@ static void sub_804C3AC(SuperEggRoboZ *boss)
     s->y = I(sp00.y) - gCamera.y;
 
     s->frameFlags
-        = (gUnknown_030054B8++ | (SPRITE_FLAG(PRIORITY, 3) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
+        = (gOamMatrixIndex++ | (SPRITE_FLAG(PRIORITY, 3) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
 
     tf->rotation = boss->unk10;
     tf->qScaleX = Q(1);
@@ -1818,8 +1787,8 @@ static void sub_804C3AC(SuperEggRoboZ *boss)
         s->x = I(sp00.x) - gCamera.x;
         s->y = I(sp00.y) - gCamera.y;
 
-        s->frameFlags = (gUnknown_030054B8++
-                         | (SPRITE_FLAG(PRIORITY, 1) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
+        s->frameFlags
+            = (gOamMatrixIndex++ | (SPRITE_FLAG(PRIORITY, 1) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
 
         tf->rotation = boss->rotation[i];
         tf->qScaleX = Q(1);
@@ -1883,7 +1852,7 @@ static void sub_804C5B8(SuperEggRoboZ *boss)
     s->y = I(sp00.y) - gCamera.y + r3;
 
     s->frameFlags
-        = (gUnknown_030054B8++ | (SPRITE_FLAG(PRIORITY, 3) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
+        = (gOamMatrixIndex++ | (SPRITE_FLAG(PRIORITY, 3) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
 
     tf->rotation = boss->unk10;
     tf->qScaleX = Q(1);
@@ -1909,8 +1878,8 @@ static void sub_804C5B8(SuperEggRoboZ *boss)
         s->x = I(sp00.x) - gCamera.x;
         s->y = I(sp00.y) - gCamera.y;
 
-        s->frameFlags = (gUnknown_030054B8++
-                         | (SPRITE_FLAG(PRIORITY, 1) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
+        s->frameFlags
+            = (gOamMatrixIndex++ | (SPRITE_FLAG(PRIORITY, 1) | SPRITE_FLAG_MASK_ROT_SCALE_ENABLE | SPRITE_FLAG_MASK_ROT_SCALE_DOUBLE_SIZE));
 
         tf->rotation = boss->rotation[i];
         tf->qScaleX = Q(1);
@@ -2040,31 +2009,31 @@ static void sub_804CA70(SuperEggRoboZ *boss)
 
     if (boss->unkB != 0) {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[8 * 16 + i] = sArmPalettes[pal][i];
+            SET_PALETTE_COLOR_OBJ(8, i, sArmPalettes[pal][i]);
         }
     } else {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[8 * 16 + i] = sArmPalettes[0][i];
+            SET_PALETTE_COLOR_OBJ(8, i, sArmPalettes[0][i]);
         }
     }
 
     if (boss->unk3E[0] > 0) {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[9 * 16 + i] = sArmPalettes[pal][i];
+            SET_PALETTE_COLOR_OBJ(9, i, sArmPalettes[pal][i]);
         }
     } else {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[9 * 16 + i] = sArmPalettes[0][i];
+            SET_PALETTE_COLOR_OBJ(9, i, sArmPalettes[0][i]);
         }
     }
 
     if (boss->unk3E[1] > 0) {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[12 * 16 + i] = sArmPalettes[pal][i];
+            SET_PALETTE_COLOR_OBJ(12, i, sArmPalettes[pal][i]);
         }
     } else {
         for (i = 0; i < ARRAY_COUNT(sArmPalettes[0]); i++) {
-            gObjPalette[12 * 16 + i] = sArmPalettes[0][i];
+            SET_PALETTE_COLOR_OBJ(12, i, sArmPalettes[0][i]);
         }
     }
 
