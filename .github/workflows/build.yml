@@ -29,7 +29,8 @@ jobs:
           name: sdl_win32-build
           path: |
             sa2.sdl_win32.exe
-            SDL2.dll      - name: Generate reports (Chao Garden)
+            SDL2.dll      
+      - name: Generate reports (Chao Garden)
         if: ${{ github.event_name == 'push' }}
         run: |
           cd chao_garden
